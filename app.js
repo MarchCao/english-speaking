@@ -81,59 +81,137 @@ function updateHeader() {
 }
 
 /* ---------- 语音：朗读（TTS） ---------- */
-function speak(text, rate) {
-  if (!("speechSynthesis" in window)) { toast("😢 你的浏览器不支持语音朗读"); return; }
-  try {
-    speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.rate = rate || 0.8;   /* 慢一点，孩子听得清 */
-    u.pitch = 1.05;
-    var vs = speechSynthesis.getVoices();
-    var v = null;
-    for (var i = 0; i < vs.length; i++) {
-      var lang = (vs[i].lang || "").toLowerCase();
-      if (lang.indexOf("en-us") === 0) { v = vs[i]; break; }
-      if (!v && lang.indexOf("en") === 0) v = vs[i];
-    }
-    if (v) u.voice = v;
-    speechSynthesis.speak(u);
-  } catch (e) { toast("😢 朗读失败，请再试一次"); }
+var TTS_VOICES = [];
+function loadTtsVoices() {
+  try { TTS_VOICES = window.speechSynthesis.getVoices() || []; } catch (e) { TTS_VOICES = []; }
+}
+function pickEnVoice() {
+  var fallback = null;
+  for (var i = 0; i < TTS_VOICES.length; i++) {
+    var lang = String(TTS_VOICES[i].lang || "").toLowerCase().replace("_", "-");
+    if (lang.indexOf("en-us") === 0) return TTS_VOICES[i];
+    if (!fallback && lang.indexOf("en") === 0) fallback = TTS_VOICES[i];
+  }
+  return fallback;
 }
 if ("speechSynthesis" in window) {
-  /* 提前加载语音列表（部分浏览器异步加载） */
-  speechSynthesis.getVoices();
-  speechSynthesis.onvoiceschanged = function () { speechSynthesis.getVoices(); };
+  loadTtsVoices(); /* 部分浏览器/手机语音列表是异步加载的 */
+  try { window.speechSynthesis.onvoiceschanged = loadTtsVoices; } catch (e) {}
+}
+function speak(text, rate) {
+  if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+    toast("😢 当前浏览器不支持语音朗读，换 Chrome 或 Edge 试试");
+    return;
+  }
+  try {
+    var synth = window.speechSynthesis;
+    synth.cancel();
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-US";
+    u.rate = rate || 0.85;   /* 慢一点，孩子听得清 */
+    u.pitch = 1.05;
+    if (!TTS_VOICES.length) loadTtsVoices();
+    var v = pickEnVoice();
+    if (v) u.voice = v;
+    var spoke = false, finished = false;
+    /* iOS 偶发朗读中途暂停，检测到就唤醒 */
+    var resumeTimer = setInterval(function () {
+      try { if (!finished && synth.paused) synth.resume(); } catch (e) {}
+    }, 400);
+    function done() { finished = true; clearInterval(resumeTimer); clearTimeout(watchdog); }
+    u.onstart = function () { spoke = true; };
+    u.onend = function () { done(); };
+    u.onerror = function () { done(); if (!spoke) toast("😢 朗读失败，换 Chrome 或 Edge 试试"); };
+    /* 3 秒还没出声，大概率是这台设备没声音，给个温柔提示 */
+    var watchdog = setTimeout(function () {
+      if (!spoke && !finished) toast("🔊 如果没听到声音，可以换 Chrome 或 Edge 浏览器试试");
+    }, 3000);
+    /* iOS 修复：cancel 后紧接着 speak 会被吞掉，错开一个节拍再播 */
+    setTimeout(function () {
+      try { synth.speak(u); }
+      catch (e) { done(); toast("😢 朗读失败，请再试一次"); }
+    }, 60);
+  } catch (e) { toast("😢 朗读失败，请再试一次"); }
 }
 
 /* ---------- 语音：识别（STT） ---------- */
 var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-function listenOnce() {
+var activeRec = null; /* 正在进行的识别：{ rec, btn, startedAt, stop } */
+function stopActiveRec() {
+  if (activeRec) { try { activeRec.rec.stop(); } catch (e) {} activeRec = null; }
+}
+/* 错误码 → 家长/孩子能看懂的提示 */
+function srErrorMsg(code) {
+  if (code === "not-allowed" || code === "service-not-allowed")
+    return "🔒 麦克风权限被拒绝了：点一下浏览器地址栏旁边的 🔒 图标，把「麦克风」设为允许，然后再试一次";
+  if (code === "audio-capture")
+    return "🎤 麦克风被其他应用占用了：关掉其他正在用麦克风的应用再试";
+  if (code === "network")
+    return "📡 语音识别需要联网：检查一下网络连接再试";
+  if (code === "unsupported")
+    return "😢 当前浏览器不支持语音识别（微信、QQ、Safari 里用不了），请用 Chrome 或 Edge 打开";
+  if (code === "startup-failed" || code === "start-failed")
+    return "😢 麦克风启动失败，换 Chrome 或 Edge 浏览器试试";
+  return null; /* no-speech 之类走默认鼓励语 */
+}
+/*
+ * 开始一次语音识别（Promise）。
+ * opts: { btn, onlive(text) }
+ * - continuous + interim：持续聆听、实时显示，不会"没时间说话"
+ * - 识别中再点同一按钮 = 手动结束；30 秒无操作自动结束
+ */
+function listenOnce(opts) {
+  opts = opts || {};
   return new Promise(function (resolve, reject) {
-    if (!SR) { reject(new Error("unsupported")); return; }
-    var done = false;
-    var r = new SR();
-    r.lang = "en-US";
-    r.interimResults = false;
-    r.maxAlternatives = 5;
-    var timer = setTimeout(function () {
-      if (!done) { done = true; try { r.stop(); } catch (e) {} reject(new Error("timeout")); }
-    }, 12000);
-    function finish(fn, arg) {
-      if (done) return;
-      done = true; clearTimeout(timer); fn(arg);
-    }
-    r.onresult = function (e) {
-      var alts = [];
-      var res = e.results[0];
-      for (var i = 0; i < res.length; i++) alts.push(res[i].transcript);
-      finish(resolve, alts.join(" "));
-      try { r.stop(); } catch (e2) {}
+    if (!SR) { reject({ code: "unsupported" }); return; }
+    stopActiveRec();
+    var rec;
+    try { rec = new SR(); } catch (e) { reject({ code: "start-failed" }); return; }
+    var done = false, finalText = "", lastInterim = "", audioStarted = false;
+    rec.lang = "en-US";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 3;
+    var timer = setTimeout(function () { try { rec.stop(); } catch (e) {} }, 30000);
+    function cleanup() { clearTimeout(timer); if (activeRec && activeRec.rec === rec) activeRec = null; }
+    function ok(text) { if (done) return; done = true; cleanup(); resolve(text); }
+    function fail(code) { if (done) return; done = true; cleanup(); try { rec.abort(); } catch (e) {} reject({ code: code }); }
+    activeRec = {
+      rec: rec, btn: opts.btn || null, startedAt: Date.now(),
+      stop: function () { if (!done) { try { rec.stop(); } catch (e) {} } }
     };
-    r.onerror = function (e) { finish(reject, e); };
-    r.onend = function () { finish(reject, new Error("no-speech")); };
-    try { r.start(); } catch (e) { finish(reject, e); }
+    rec.onaudiostart = function () { audioStarted = true; };
+    rec.onresult = function (e) {
+      var interim = "";
+      for (var i = e.resultIndex; i < e.results.length; i++) {
+        var tr = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalText += tr + " ";
+        else interim += tr;
+      }
+      lastInterim = interim;
+      if (opts.onlive) opts.onlive((finalText + interim).trim());
+    };
+    rec.onerror = function (e) {
+      var code = (e && e.error) || "unknown";
+      if (code === "aborted" || code === "no-speech") ok((finalText + " " + lastInterim).trim());
+      else fail(code);
+    };
+    rec.onend = function () {
+      if (done) return;
+      if (!audioStarted && !finalText && !lastInterim) fail("startup-failed");
+      else ok((finalText + " " + lastInterim).trim());
+    };
+    try { rec.start(); } catch (e) { fail("start-failed"); }
   });
+}
+/* 识别中再次点击同一按钮：手动结束（1 秒内防抖，避免点太快误触） */
+function toggleStop(btn) {
+  if (activeRec && activeRec.btn === btn) {
+    if (Date.now() - activeRec.startedAt < 1000) return true;
+    activeRec.stop();
+    return true;
+  }
+  return false;
 }
 
 /* ---------- 打分：宽容的模糊匹配 ---------- */
@@ -258,16 +336,20 @@ function renderWords() {
   cat.words.forEach(function (w) { renderStars("stars-words-" + cat.id + "-" + w.en, S.words[cat.id + "-" + w.en] || 0); });
 }
 function noSRWarn(fbEl) {
-  fbEl.innerHTML = '<div class="feedback-msg fb-retry">😢 你的浏览器不支持语音识别，请用 Chrome 浏览器打开</div>';
+  fbEl.innerHTML = '<div class="feedback-msg fb-retry">😢 当前浏览器不支持语音识别（微信、QQ、Safari 里用不了），请用 Chrome 或 Edge 打开；「🔊 听一听」不受影响</div>';
 }
 async function practiceWord(btn) {
   var id = btn.getAttribute("data-id"), text = btn.getAttribute("data-text");
   var fb = $("fb-words-" + id);
   if (!SR) { noSRWarn(fb); return; }
-  btn.disabled = true;
-  var old = btn.innerHTML; btn.innerHTML = "🎤 正在听…";
+  if (toggleStop(btn)) return; /* 识别中再点 = 说完了，手动结束 */
+  var old = btn.innerHTML;
+  btn.innerHTML = "🛑 说完了，点我结束";
+  fb.innerHTML = '<div class="heard live">🎤 麦克风启动中…开始说吧</div>';
   try {
-    var heard = await listenOnce();
+    var heard = await listenOnce({ btn: btn, onlive: function (t) {
+      fb.innerHTML = '<div class="heard live">🎤 听到：' + escapeHtml(t || "…") + "</div>";
+    } });
     var sc = scoreText(text, heard);
     var stars = starsFor(sc.ratio);
     recordResult("words", id, stars);
@@ -275,9 +357,12 @@ async function practiceWord(btn) {
     fb.innerHTML = '<div class="heard">你说的是：' + escapeHtml(heard || "（没听清）") + "</div>" + feedbackHtml(stars);
     if (stars === 3) confetti();
   } catch (e) {
-    fb.innerHTML = '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
+    var msg = srErrorMsg(e && e.code);
+    fb.innerHTML = msg
+      ? '<div class="feedback-msg fb-retry">' + escapeHtml(msg) + "</div>"
+      : '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
   }
-  btn.disabled = false; btn.innerHTML = old;
+  btn.innerHTML = old;
 }
 
 /* ============================================================
@@ -315,10 +400,14 @@ async function practiceSentence(btn) {
   var id = btn.getAttribute("data-id"), text = btn.getAttribute("data-text");
   var fb = $("fb-sentences-" + id);
   if (!SR) { noSRWarn(fb); return; }
-  btn.disabled = true;
-  var old = btn.innerHTML; btn.innerHTML = "🎤 正在听…";
+  if (toggleStop(btn)) return; /* 识别中再点 = 说完了，手动结束 */
+  var old = btn.innerHTML;
+  btn.innerHTML = "🛑 说完了，点我结束";
+  fb.innerHTML = '<div class="heard live">🎤 麦克风启动中…开始说吧</div>';
   try {
-    var heard = await listenOnce();
+    var heard = await listenOnce({ btn: btn, onlive: function (t) {
+      fb.innerHTML = '<div class="heard live">🎤 听到：' + escapeHtml(t || "…") + "</div>";
+    } });
     var sc = scoreText(text, heard);
     var stars = starsFor(sc.ratio);
     recordResult("sentences", id, stars);
@@ -326,9 +415,12 @@ async function practiceSentence(btn) {
     fb.innerHTML = '<div class="heard">你说的是：' + escapeHtml(heard || "（没听清）") + "</div>" + feedbackHtml(stars);
     if (stars === 3) confetti();
   } catch (e) {
-    fb.innerHTML = '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
+    var msg = srErrorMsg(e && e.code);
+    fb.innerHTML = msg
+      ? '<div class="feedback-msg fb-retry">' + escapeHtml(msg) + "</div>"
+      : '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
   }
-  btn.disabled = false; btn.innerHTML = old;
+  btn.innerHTML = old;
 }
 
 /* ============================================================
@@ -439,18 +531,25 @@ async function rpMic(btn) {
   var line = RP.dlg.lines[RP.step];
   var fb = $("rp-fb");
   if (!SR) { noSRWarn(fb); return; }
-  btn.disabled = true;
-  var old = btn.innerHTML; btn.innerHTML = "🎤 正在听…";
+  if (toggleStop(btn)) return; /* 识别中再点 = 说完了，手动结束 */
+  var old = btn.innerHTML;
+  btn.innerHTML = "🛑 说完了，点我结束";
+  fb.innerHTML = '<div class="heard live">🎤 麦克风启动中…开始说吧</div>';
   try {
-    var heard = await listenOnce();
+    var heard = await listenOnce({ btn: btn, onlive: function (t) {
+      fb.innerHTML = '<div class="heard live">🎤 听到：' + escapeHtml(t || "…") + "</div>";
+    } });
     var stars = starsFor(scoreText(line.en, heard).ratio);
     RP.scores.push(stars);
     fb.innerHTML = '<div class="heard">你说的是：' + escapeHtml(heard || "（没听清）") + "</div>" + feedbackHtml(stars);
     if (stars === 3) confetti();
     setTimeout(function () { if (RP) { RP.step++; renderRP(); } }, 1800);
   } catch (e) {
-    fb.innerHTML = '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
-    btn.disabled = false; btn.innerHTML = old;
+    var msg = srErrorMsg(e && e.code);
+    fb.innerHTML = msg
+      ? '<div class="feedback-msg fb-retry">' + escapeHtml(msg) + "</div>"
+      : '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
+    btn.innerHTML = old;
   }
 }
 
@@ -460,7 +559,7 @@ async function rpMic(btn) {
 function renderChallenges() {
   $("challenge-list").innerHTML = SCENES.map(function (sc) {
     return '<div class="card scene-card">' +
-      '<div class="scene-emojis">' + sc.emojis + "</div>" +
+      '<div class="scene-art">' + sc.art + "</div>" +
       '<div class="scene-title">看图说话 👀</div>' +
       '<div class="scene-prompt">图上有什么？用英语大声说出来！</div>' +
       '<div class="scene-hint" id="hint-' + sc.id + '" hidden>💡 例句：' + escapeHtml(sc.example) +
@@ -480,10 +579,14 @@ async function practiceChallenge(btn) {
   var sc = SCENES.find(function (x) { return x.id === id; });
   var fb = $("fb-challenges-" + id);
   if (!SR) { noSRWarn(fb); return; }
-  btn.disabled = true;
-  var old = btn.innerHTML; btn.innerHTML = "🎤 正在听…";
+  if (toggleStop(btn)) return; /* 识别中再点 = 说完了，手动结束 */
+  var old = btn.innerHTML;
+  btn.innerHTML = "🛑 说完了，点我结束";
+  fb.innerHTML = '<div class="heard live">🎤 麦克风启动中…开始说吧</div>';
   try {
-    var heard = await listenOnce();
+    var heard = await listenOnce({ btn: btn, onlive: function (t) {
+      fb.innerHTML = '<div class="heard live">🎤 听到：' + escapeHtml(t || "…") + "</div>";
+    } });
     var hset = {};
     norm(heard).split(" ").filter(Boolean).forEach(function (w) { hset[w] = true; });
     var hit = sc.keywords.filter(function (k) { return hset[k]; });
@@ -497,9 +600,12 @@ async function practiceChallenge(btn) {
       '<div class="kw-row">关键词：' + kwHtml + "</div>" + feedbackHtml(stars);
     if (stars === 3) confetti();
   } catch (e) {
-    fb.innerHTML = '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
+    var msg = srErrorMsg(e && e.code);
+    fb.innerHTML = msg
+      ? '<div class="feedback-msg fb-retry">' + escapeHtml(msg) + "</div>"
+      : '<div class="feedback-msg fb-retry">🎤 ' + escapeHtml(FEEDBACK[0][Math.floor(Math.random() * FEEDBACK[0].length)]) + "</div>";
   }
-  btn.disabled = false; btn.innerHTML = old;
+  btn.innerHTML = old;
 }
 
 /* ============================================================

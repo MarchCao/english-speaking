@@ -244,6 +244,17 @@ main { max-width: 720px; margin: 0 auto; padding: 16px 14px 8px; }
 /* ---------- 挑战 ---------- */
 .scene-card { text-align: center; }
 .scene-emojis { font-size: 64px; letter-spacing: 6px; }
+/* 挑战场景 SVG 插画：不依赖系统 emoji 字体 */
+.scene-art { margin: 6px auto 2px; }
+.scene-art svg { width: 120px; height: 120px; }
+/* emoji 字体兜底：优先使用系统彩色 emoji 字体 */
+.word-emoji, .dlg-emoji, .hero-mascot, .mode-emoji, .nav-emoji,
+.stat-emoji, .badge-emoji, .scene-emojis {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Android Emoji", sans-serif;
+}
+/* 录音中：呼吸灯效果 */
+.heard.live { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 .scene-title { font-size: 18px; font-weight: 800; margin-top: 8px; }
 .scene-prompt { color: var(--ink-soft); font-size: 14px; margin: 4px 0 8px; }
 .scene-hint {

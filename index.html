@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="英语口语小达人：专为中国小学生设计的英语口语练习网站，单词、句子、对话、挑战，边玩边学！">
+  <title>英语口语小达人 🎤</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="app-header">
+  <span>🦁 英语口语小达人</span>
+  <span class="hdr-stars" id="hdr-stars">⭐ 0</span>
+</header>
+
+<main>
+  <!-- 不支持语音识别时的提示 -->
+  <div class="notice" id="sr-notice" hidden>
+    💡 温馨提示：语音跟读功能需要 Chrome 浏览器的语音识别支持，「🔊 听一听」功能不受影响。
+  </div>
+
+  <!-- ============ 首页 ============ -->
+  <section id="view-home" class="view active">
+    <div class="hero">
+      <div class="hero-mascot">🦁</div>
+      <h1>英语口语小达人</h1>
+      <p>大声说出来，你就是英语小明星！🌟</p>
+    </div>
+
+    <div class="daily-card">
+      <div class="daily-text" id="daily-text">📝 今日任务加载中…</div>
+      <button class="btn btn-speak" data-act="daily-go">去完成</button>
+    </div>
+
+    <div class="mode-grid">
+      <button class="mode-card" data-act="nav" data-view="words">
+        <div class="mode-emoji">📖</div>
+        <div class="mode-name">单词乐园</div>
+        <div class="mode-desc">听一听，跟我读</div>
+      </button>
+      <button class="mode-card" data-act="nav" data-view="sentences">
+        <div class="mode-emoji">💬</div>
+        <div class="mode-name">句子跟读</div>
+        <div class="mode-desc">整句表达更流利</div>
+      </button>
+      <button class="mode-card" data-act="nav" data-view="dialogues">
+        <div class="mode-emoji">🎭</div>
+        <div class="mode-name">情景对话</div>
+        <div class="mode-desc">角色扮演真好玩</div>
+      </button>
+      <button class="mode-card" data-act="nav" data-view="challenge">
+        <div class="mode-emoji">🎮</div>
+        <div class="mode-name">趣味挑战</div>
+        <div class="mode-desc">看图说话拿三星</div>
+      </button>
+      <button class="mode-card" data-act="nav" data-view="achievements">
+        <div class="mode-emoji">🏆</div>
+        <div class="mode-name">我的成就</div>
+        <div class="mode-desc">星星徽章亮闪闪</div>
+      </button>
+      <button class="mode-card" data-act="nav" data-view="words">
+        <div class="mode-emoji">🎧</div>
+        <div class="mode-name">随便练练</div>
+        <div class="mode-desc">想练哪里点哪里</div>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============ 单词乐园 ============ -->
+  <section id="view-words" class="view">
+    <h2 class="page-title">📖 单词乐园</h2>
+    <p class="page-sub">先点「🔊 听一听」，再点「🎤 跟我读」，拿到三颗星！</p>
+    <div class="tabs" id="word-tabs"></div>
+    <div id="word-grid"></div>
+  </section>
+
+  <!-- ============ 句子跟读 ============ -->
+  <section id="view-sentences" class="view">
+    <h2 class="page-title">💬 句子跟读</h2>
+    <p class="page-sub">整句跟读，越说越流利！</p>
+    <div class="tabs" id="sent-tabs"></div>
+    <div id="sent-list"></div>
+  </section>
+
+  <!-- ============ 情景对话 ============ -->
+  <section id="view-dialogues" class="view">
+    <h2 class="page-title">🎭 情景对话</h2>
+    <p class="page-sub">点气泡可以听发音，还能和我角色扮演哦！</p>
+    <div id="dlg-list"></div>
+    <div id="dlg-detail" hidden></div>
+  </section>
+
+  <!-- ============ 趣味挑战 ============ -->
+  <section id="view-challenge" class="view">
+    <h2 class="page-title">🎮 趣味挑战</h2>
+    <p class="page-sub">看图说话：用英语描述你看到的，说出关键词就能拿星！</p>
+    <div id="challenge-list"></div>
+  </section>
+
+  <!-- ============ 我的成就 ============ -->
+  <section id="view-achievements" class="view">
+    <h2 class="page-title">🏆 我的成就</h2>
+    <p class="page-sub">你的每一分努力都记录在这里！</p>
+    <div id="ach-content"></div>
+  </section>
+</main>
+
+<nav class="bottom-nav">
+  <button class="nav-item active" data-act="nav" data-view="home">
+    <span class="nav-emoji">🏠</span>首页
+  </button>
+  <button class="nav-item" data-act="nav" data-view="words">
+    <span class="nav-emoji">📖</span>单词
+  </button>
+  <button class="nav-item" data-act="nav" data-view="sentences">
+    <span class="nav-emoji">💬</span>句子
+  </button>
+  <button class="nav-item" data-act="nav" data-view="dialogues">
+    <span class="nav-emoji">🎭</span>对话
+  </button>
+  <button class="nav-item" data-act="nav" data-view="challenge">
+    <span class="nav-emoji">🎮</span>挑战
+  </button>
+  <button class="nav-item" data-act="nav" data-view="achievements">
+    <span class="nav-emoji">🏆</span>成就
+  </button>
+</nav>
+
+<div id="toast"></div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

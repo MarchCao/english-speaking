@@ -65,6 +65,55 @@ function recordResult(kind, id, stars) {
   updateHeader();
 }
 
+/* ---------- 教材选择（localStorage） ---------- */
+var TB_KEY = "speakFunTextbook";
+var TB_DEFAULT = "wy-3qi-4a"; /* 默认：外研版（三起）四年级上册 */
+var TB_GENERAL = "general";   /* 通用版 */
+function allTextbooks() {
+  return (typeof TEXTBOOKS !== "undefined" && TEXTBOOKS) || [];
+}
+function textbookById(id) {
+  var list = allTextbooks();
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+  return null;
+}
+function getTextbookId() {
+  try {
+    var v = localStorage.getItem(TB_KEY);
+    if (v === TB_GENERAL) return TB_GENERAL;
+    if (v && textbookById(v)) return v;
+  } catch (e) { /* 忽略 */ }
+  return TB_DEFAULT;
+}
+function setTextbookId(id) {
+  try { localStorage.setItem(TB_KEY, id); } catch (e) { /* 忽略 */ }
+}
+function currentTextbook() { return textbookById(getTextbookId()); }
+/* 单词/句子分组：通用版用 data.js，教材版用 textbooks.js 的 10 个 Module */
+function getWordGroups() {
+  var tb = currentTextbook();
+  if (!tb) return WORD_CATEGORIES;
+  return tb.modules.map(function (m) {
+    return { id: "wy4a-" + m.id, name: "M" + m.no + " " + m.name, emoji: m.emoji, words: m.words };
+  });
+}
+function getSentenceGroups() {
+  var tb = currentTextbook();
+  if (!tb) return SENTENCE_TOPICS;
+  return tb.modules.map(function (m) {
+    return { id: "wy4a-" + m.id, name: "M" + m.no + " " + m.name, emoji: m.emoji, sentences: m.sentences };
+  });
+}
+function findGroup(groups, id) {
+  for (var i = 0; i < groups.length; i++) if (groups[i].id === id) return groups[i];
+  return groups[0];
+}
+/* 教材版单词练习 ID 用 wy4a: 前缀：wy4a:<module>:<单词>，如 wy4a:m1:station */
+function wordPracticeId(catId, en) {
+  if (catId.indexOf("wy4a-") === 0) return "wy4a:" + catId.slice(5) + ":" + en;
+  return catId + "-" + en; /* 通用版保持原规则 */
+}
+
 /* ---------- 视图切换 ---------- */
 function showView(name) {
   document.querySelectorAll(".view").forEach(function (v) { v.classList.remove("active"); });
@@ -277,11 +326,13 @@ function renderDailyTask() {
   var day = Math.floor(Date.now() / 864e5);
   var kind = day % 3, html;
   if (kind === 0) {
-    var c = WORD_CATEGORIES[day % WORD_CATEGORIES.length];
+    var groups = getWordGroups();
+    var c = groups[day % groups.length];
     dailyGo = { view: "words", tab: c.id };
     html = "📝 今日任务：跟读 5 个「" + c.emoji + c.name + "」单词！";
   } else if (kind === 1) {
-    var t = SENTENCE_TOPICS[day % SENTENCE_TOPICS.length];
+    var topics = getSentenceGroups();
+    var t = topics[day % topics.length];
     dailyGo = { view: "sentences", tab: t.id };
     html = "📝 今日任务：跟读 3 个「" + t.emoji + t.name + "」句子！";
   } else {
@@ -302,9 +353,9 @@ function goDaily() {
 /* ============================================================
  * 单词乐园
  * ============================================================ */
-var curWordCat = WORD_CATEGORIES[0].id;
+var curWordCat = null;
 function renderWordTabs() {
-  $("word-tabs").innerHTML = WORD_CATEGORIES.map(function (c) {
+  $("word-tabs").innerHTML = getWordGroups().map(function (c) {
     return '<button class="chip' + (c.id === curWordCat ? " active" : "") +
       '" data-act="wcat" data-id="' + c.id + '">' + c.emoji + " " + c.name + "</button>";
   }).join("");
@@ -315,9 +366,10 @@ function selectWordCat(id) {
   renderWords();
 }
 function renderWords() {
-  var cat = WORD_CATEGORIES.find(function (c) { return c.id === curWordCat; });
+  var cat = findGroup(getWordGroups(), curWordCat);
+  curWordCat = cat.id;
   $("word-grid").innerHTML = cat.words.map(function (w) {
-    var id = cat.id + "-" + w.en; /* 分类+单词，避免 orange（食物/颜色）这类重名冲突 */
+    var id = wordPracticeId(cat.id, w.en); /* 通用版：分类-单词；教材版：wy4a:m1:station */
     var visual = w.num
       ? '<div class="word-num">' + w.num + "</div>"
       : '<div class="word-emoji">' + w.emoji + "</div>";
@@ -368,9 +420,9 @@ async function practiceWord(btn) {
 /* ============================================================
  * 句子跟读
  * ============================================================ */
-var curSentTopic = SENTENCE_TOPICS[0].id;
+var curSentTopic = null;
 function renderSentTabs() {
-  $("sent-tabs").innerHTML = SENTENCE_TOPICS.map(function (t) {
+  $("sent-tabs").innerHTML = getSentenceGroups().map(function (t) {
     return '<button class="chip' + (t.id === curSentTopic ? " active" : "") +
       '" data-act="stopic" data-id="' + t.id + '">' + t.emoji + " " + t.name + "</button>";
   }).join("");
@@ -381,7 +433,8 @@ function selectSentTopic(id) {
   renderSentences();
 }
 function renderSentences() {
-  var topic = SENTENCE_TOPICS.find(function (t) { return t.id === curSentTopic; });
+  var topic = findGroup(getSentenceGroups(), curSentTopic);
+  curSentTopic = topic.id;
   $("sent-list").innerHTML = topic.sentences.map(function (s) {
     return '<div class="card sent-card">' +
       '<div class="sent-en">' + escapeHtml(s.en) + "</div>" +
@@ -651,6 +704,38 @@ function resetStats() {
 }
 
 /* ============================================================
+ * 教材切换：首页 / 单词页 / 句子页
+ * ============================================================ */
+function renderTextbookRows() {
+  var cur = getTextbookId();
+  var btns = [{ id: TB_GENERAL, label: "🔤 通用版" }];
+  allTextbooks().forEach(function (tb) {
+    btns.push({ id: tb.id, label: tb.emoji + " " + tb.short });
+  });
+  var html = btns.map(function (b) {
+    return '<button class="tb-btn' + (b.id === cur ? " active" : "") +
+      '" data-act="textbook" data-id="' + b.id + '">' + b.label + "</button>";
+  }).join("");
+  ["tb-row-home", "tb-row-words", "tb-row-sent"].forEach(function (id) {
+    var el = $(id);
+    if (el) el.innerHTML = html;
+  });
+}
+function selectTextbook(id) {
+  setTextbookId(id);
+  curWordCat = getWordGroups()[0].id;
+  curSentTopic = getSentenceGroups()[0].id;
+  renderTextbookRows();
+  renderWordTabs();
+  renderWords();
+  renderSentTabs();
+  renderSentences();
+  renderDailyTask();
+  var tb = textbookById(id);
+  toast(tb ? tb.emoji + " 已切换到" + tb.name : "🔤 已切换到通用版");
+}
+
+/* ============================================================
  * 全局点击委托
  * ============================================================ */
 document.addEventListener("click", function (e) {
@@ -666,6 +751,7 @@ document.addEventListener("click", function (e) {
   else if (act === "speak-challenge") practiceChallenge(b);
   else if (act === "wcat") selectWordCat(b.getAttribute("data-id"));
   else if (act === "stopic") selectSentTopic(b.getAttribute("data-id"));
+  else if (act === "textbook") selectTextbook(b.getAttribute("data-id"));
   else if (act === "open-dialog") openDialogue(b.getAttribute("data-id"));
   else if (act === "dlg-back") renderDialogList();
   else if (act === "choose-role") chooseRole(b.getAttribute("data-id"), parseInt(b.getAttribute("data-role"), 10));
@@ -678,6 +764,9 @@ document.addEventListener("click", function (e) {
 
 /* ---------- 初始化 ---------- */
 document.addEventListener("DOMContentLoaded", function () {
+  curWordCat = getWordGroups()[0].id;
+  curSentTopic = getSentenceGroups()[0].id;
+  renderTextbookRows();
   renderWordTabs();
   renderWords();
   renderSentTabs();

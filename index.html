@@ -33,6 +33,8 @@
       <button class="btn btn-speak" data-act="daily-go">去完成</button>
     </div>
 
+    <div class="tb-row" id="tb-row-home"></div>
+
     <div class="mode-grid">
       <button class="mode-card" data-act="nav" data-view="words">
         <div class="mode-emoji">📖</div>
@@ -71,6 +73,7 @@
   <section id="view-words" class="view">
     <h2 class="page-title">📖 单词乐园</h2>
     <p class="page-sub">先点「🔊 听一听」，再点「🎤 跟我读」，拿到三颗星！</p>
+    <div class="tb-row" id="tb-row-words"></div>
     <div class="tabs" id="word-tabs"></div>
     <div id="word-grid"></div>
   </section>
@@ -79,6 +82,7 @@
   <section id="view-sentences" class="view">
     <h2 class="page-title">💬 句子跟读</h2>
     <p class="page-sub">整句跟读，越说越流利！</p>
+    <div class="tb-row" id="tb-row-sent"></div>
     <div class="tabs" id="sent-tabs"></div>
     <div id="sent-list"></div>
   </section>
@@ -130,6 +134,7 @@
 <div id="toast"></div>
 
 <script src="data.js"></script>
+<script src="textbooks.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
